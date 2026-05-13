@@ -1,6 +1,6 @@
 import mongoose, { type HydratedDocument, type Model, Schema, type Types } from "mongoose";
-import type { AbnormalSeverity, PreferredLanguage } from "./constants";
-import { ABNORMAL_SEVERITIES, PREFERRED_LANGUAGES } from "./constants";
+import type { AbnormalSeverity, AnalysisStatus, PreferredLanguage } from "./constants";
+import { ABNORMAL_SEVERITIES, ANALYSIS_STATUSES, PREFERRED_LANGUAGES } from "./constants";
 
 /** Single structured lab-style finding */
 export interface IAbnormalValueItem {
@@ -13,13 +13,21 @@ export interface IAbnormalValueItem {
 
 export interface IAnalysis {
   reportId: Types.ObjectId;
+  analysisStatus: AnalysisStatus;
+  generatedAt: Date | null;
   summary: string;
+  keyFindings: string[];
+  possibleConcerns: string[];
+  lifestyleSuggestions: string[];
   abnormalValues: IAbnormalValueItem[];
   precautions: string[];
+  /** Kept for backward compatibility; mirrors lifestyle suggestions when populated from AI */
   suggestions: string[];
   questionsForDoctor: string[];
   disclaimer: string;
   language: PreferredLanguage;
+  /** Optional raw JSON string from the model (truncated in app layer if needed) */
+  aiResponseRaw?: string;
   createdAt: Date;
 }
 
@@ -44,6 +52,18 @@ const abnormalValueItemSchema = new Schema<IAbnormalValueItem>(
   { _id: false },
 );
 
+const stringList = (maxItems: number, maxItemLen: number) => ({
+  type: [String],
+  default: [],
+  validate: {
+    validator: (v: string[]) =>
+      Array.isArray(v) &&
+      v.length <= maxItems &&
+      v.every((s) => typeof s === "string" && s.length <= maxItemLen),
+    message: "Invalid string list",
+  },
+});
+
 const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
   {
     reportId: {
@@ -53,12 +73,29 @@ const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
       unique: true,
       index: true,
     },
+    analysisStatus: {
+      type: String,
+      enum: {
+        values: ANALYSIS_STATUSES,
+        message: "{VALUE} is not a valid analysis status",
+      },
+      default: "pending",
+      index: true,
+    },
+    generatedAt: {
+      type: Date,
+      default: null,
+    },
     summary: {
       type: String,
-      required: [true, "summary is required"],
+      required: true,
       trim: true,
       maxlength: 50_000,
+      default: "",
     },
+    keyFindings: stringList(40, 2000),
+    possibleConcerns: stringList(40, 2000),
+    lifestyleSuggestions: stringList(40, 2000),
     abnormalValues: {
       type: [abnormalValueItemSchema],
       default: [],
@@ -67,33 +104,9 @@ const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
         message: "Too many abnormal value entries",
       },
     },
-    precautions: {
-      type: [String],
-      default: [],
-      validate: {
-        validator: (v: string[]) =>
-          Array.isArray(v) && v.length <= 200 && v.every((s) => typeof s === "string" && s.length <= 2000),
-        message: "Invalid precautions array",
-      },
-    },
-    suggestions: {
-      type: [String],
-      default: [],
-      validate: {
-        validator: (v: string[]) =>
-          Array.isArray(v) && v.length <= 200 && v.every((s) => typeof s === "string" && s.length <= 2000),
-        message: "Invalid suggestions array",
-      },
-    },
-    questionsForDoctor: {
-      type: [String],
-      default: [],
-      validate: {
-        validator: (v: string[]) =>
-          Array.isArray(v) && v.length <= 100 && v.every((s) => typeof s === "string" && s.length <= 1000),
-        message: "Invalid questionsForDoctor array",
-      },
-    },
+    precautions: stringList(40, 2000),
+    suggestions: stringList(40, 2000),
+    questionsForDoctor: stringList(100, 1000),
     disclaimer: {
       type: String,
       required: true,
@@ -111,6 +124,11 @@ const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
       required: true,
       default: "en",
     },
+    aiResponseRaw: {
+      type: String,
+      maxlength: 120_000,
+      select: false,
+    },
     createdAt: {
       type: Date,
       default: () => new Date(),
@@ -122,5 +140,6 @@ const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
 );
 
 analysisSchema.index({ createdAt: -1 });
+analysisSchema.index({ analysisStatus: 1, createdAt: -1 });
 
 export const Analysis = mongoose.model<IAnalysis, IAnalysisModel>("Analysis", analysisSchema);
