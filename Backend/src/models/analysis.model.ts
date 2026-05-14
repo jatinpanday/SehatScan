@@ -1,6 +1,12 @@
 import mongoose, { type HydratedDocument, type Model, Schema, type Types } from "mongoose";
 import type { AbnormalSeverity, AnalysisStatus, PreferredLanguage } from "./constants";
 import { ABNORMAL_SEVERITIES, ANALYSIS_STATUSES, PREFERRED_LANGUAGES } from "./constants";
+import type { AnalysisTranslationContent } from "../translations/translation.types";
+import {
+  SUPPORTED_TRANSLATION_LANGUAGES,
+  TRANSLATION_STATUSES,
+  type TranslationStatus,
+} from "../translations/translation.constants";
 
 /** Single structured lab-style finding */
 export interface IAbnormalValueItem {
@@ -26,6 +32,9 @@ export interface IAnalysis {
   questionsForDoctor: string[];
   disclaimer: string;
   language: PreferredLanguage;
+  translatedContent: Partial<Record<PreferredLanguage, AnalysisTranslationContent>>;
+  translatedLanguage: PreferredLanguage | null;
+  translationStatus: TranslationStatus;
   /** Optional raw JSON string from the model (truncated in app layer if needed) */
   aiResponseRaw?: string;
   createdAt: Date;
@@ -63,6 +72,55 @@ const stringList = (maxItems: number, maxItemLen: number) => ({
     message: "Invalid string list",
   },
 });
+
+const translatedAbnormalValueItemSchema = new Schema(
+  {
+    markerName: { type: String, trim: true, maxlength: 200 },
+    observedValue: { type: String, trim: true, maxlength: 200 },
+    unit: { type: String, trim: true, maxlength: 64 },
+    referenceRange: { type: String, trim: true, maxlength: 256 },
+    severity: {
+      type: String,
+      trim: true,
+      maxlength: 64,
+      default: "unknown",
+    },
+  },
+  { _id: false },
+);
+
+const translatedContentItemSchema = new Schema(
+  {
+    summary: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 50_000,
+      default: "",
+    },
+    keyFindings: stringList(60, 2000),
+    abnormalValues: {
+      type: [translatedAbnormalValueItemSchema],
+      default: [],
+      validate: {
+        validator: (v: unknown[]) => Array.isArray(v) && v.length <= 500,
+        message: "Too many translated abnormal value entries",
+      },
+    },
+    possibleConcerns: stringList(60, 2000),
+    lifestyleSuggestions: stringList(60, 2000),
+    precautions: stringList(60, 2000),
+    questionsForDoctor: stringList(100, 1000),
+    disclaimer: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 10_000,
+      default: "",
+    },
+  },
+  { _id: false },
+);
 
 const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
   {
@@ -123,6 +181,33 @@ const analysisSchema = new Schema<IAnalysis, IAnalysisModel>(
       },
       required: true,
       default: "en",
+    },
+    translatedContent: {
+      en: {
+        type: translatedContentItemSchema,
+        default: undefined,
+      },
+      hi: {
+        type: translatedContentItemSchema,
+        default: undefined,
+      },
+    },
+    translatedLanguage: {
+      type: String,
+      enum: {
+        values: SUPPORTED_TRANSLATION_LANGUAGES,
+        message: "{VALUE} is not a supported translation language",
+      },
+      default: null,
+    },
+    translationStatus: {
+      type: String,
+      enum: {
+        values: TRANSLATION_STATUSES,
+        message: "{VALUE} is not a valid translation status",
+      },
+      default: "pending",
+      index: true,
     },
     aiResponseRaw: {
       type: String,

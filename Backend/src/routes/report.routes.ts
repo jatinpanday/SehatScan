@@ -6,6 +6,8 @@ import { uploadReportSingle } from "../middleware/upload.middleware";
 
 const router = Router();
 
+router.get("/", requireAuth, asyncHandler(reportController.listReports));
+router.get("/:reportId", requireAuth, asyncHandler(reportController.getReport));
 router.post(
   "/upload",
   requireAuth,
