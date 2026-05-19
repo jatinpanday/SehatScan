@@ -10,6 +10,8 @@ import {
   type PreferredLanguage,
 } from "../models/constants";
 import { isProduction } from "../config/env";
+import { Analysis, type IAnalysisDocument } from "../models/analysis.model";
+import type { IReport, IReportDocument } from "../models/report.model";
 import { Report } from "../models/report.model";
 import * as s3 from "../services/s3.service";
 import {
@@ -39,6 +41,132 @@ function parseLanguage(raw: unknown): PreferredLanguage {
     throw new AppError('Invalid language; use "en" or "hi"', 400);
   }
   return v as PreferredLanguage;
+}
+
+function computedReportStatus(
+  report: Pick<IReport, "status" | "ocrStatus">,
+  analysis?: Pick<IAnalysisDocument, "analysisStatus"> | null,
+) {
+  if (analysis?.analysisStatus === "completed") {
+    return "completed";
+  }
+  if (analysis?.analysisStatus === "failed" || report.ocrStatus === "failed" || report.status === "failed") {
+    return "failed";
+  }
+  if (analysis?.analysisStatus === "processing" || report.ocrStatus === "processing" || report.status === "processing") {
+    return "processing";
+  }
+  return report.status;
+}
+
+function serializeAnalysis(analysis?: IAnalysisDocument | null) {
+  if (!analysis) {
+    return null;
+  }
+
+  return {
+    id: String(analysis._id),
+    status: analysis.analysisStatus,
+    generatedAt: analysis.generatedAt?.toISOString() ?? null,
+    summary: analysis.summary,
+    keyFindings: analysis.keyFindings,
+    abnormalValues: analysis.abnormalValues.map((item) => ({
+      markerName: item.markerName,
+      observedValue: item.observedValue,
+      unit: item.unit,
+      referenceRange: item.referenceRange,
+      severity: item.severity,
+    })),
+    possibleConcerns: analysis.possibleConcerns,
+    lifestyleSuggestions: analysis.lifestyleSuggestions,
+    precautions: analysis.precautions,
+    questionsForDoctor: analysis.questionsForDoctor,
+    disclaimer: analysis.disclaimer,
+  };
+}
+
+function serializeReport(report: IReportDocument, analysis?: IAnalysisDocument | null, fileUrl?: string) {
+  return {
+    id: String(report._id),
+    originalFileName: report.originalFileName,
+    fileUrl,
+    fileType: report.fileType,
+    reportType: report.reportType,
+    status: computedReportStatus(report, analysis),
+    ocrStatus: report.ocrStatus,
+    analysisStatus: analysis?.analysisStatus ?? null,
+    hasAnalysis: analysis?.analysisStatus === "completed",
+    language: report.language,
+    uploadedAt: report.createdAt.toISOString(),
+    updatedAt: report.updatedAt.toISOString(),
+    processedAt: report.processedAt?.toISOString() ?? null,
+    analysis: serializeAnalysis(analysis),
+  };
+}
+
+export async function listReports(req: Request, res: Response): Promise<void> {
+  const userId = req.userId;
+  if (!userId) {
+    throw new AppError("Unauthorized", 401);
+  }
+
+  const reports = await Report.find({ userId: new Types.ObjectId(userId) })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .exec();
+
+  const reportIds = reports.map((report) => report._id);
+  const analyses = await Analysis.find({ reportId: { $in: reportIds } }).exec();
+  const analysisByReportId = new Map(analyses.map((analysis) => [String(analysis.reportId), analysis]));
+  const serializedReports = await Promise.all(
+    reports.map(async (report) => {
+      let fileUrl: string | undefined;
+      try {
+        fileUrl = await s3.getPresignedDownloadUrl(report.fileUrl);
+      } catch (err) {
+        console.error("S3 presign failed for report list item:", err);
+      }
+      return serializeReport(report, analysisByReportId.get(String(report._id)), fileUrl);
+    }),
+  );
+
+  res.json({
+    success: true,
+    data: serializedReports,
+  });
+}
+
+export async function getReport(req: Request, res: Response): Promise<void> {
+  const userId = req.userId;
+  const reportId = req.params.reportId;
+  if (!userId) {
+    throw new AppError("Unauthorized", 401);
+  }
+  if (!Types.ObjectId.isValid(reportId)) {
+    throw new AppError("Invalid report id", 400);
+  }
+
+  const report = await Report.findOne({
+    _id: new Types.ObjectId(reportId),
+    userId: new Types.ObjectId(userId),
+  }).exec();
+
+  if (!report) {
+    throw new AppError("Report not found", 404);
+  }
+
+  const analysis = await Analysis.findOne({ reportId: report._id }).exec();
+  let fileUrl: string | undefined;
+  try {
+    fileUrl = await s3.getPresignedDownloadUrl(report.fileUrl);
+  } catch (err) {
+    console.error("S3 presign failed for report detail:", err);
+  }
+
+  res.json({
+    success: true,
+    data: serializeReport(report, analysis, fileUrl),
+  });
 }
 
 /**

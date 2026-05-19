@@ -10,6 +10,10 @@ export type ReportStatus = (typeof REPORT_STATUSES)[number];
 export const OCR_STATUSES = ["pending", "processing", "completed", "failed"] as const;
 export type OcrStatus = (typeof OCR_STATUSES)[number];
 
+/** AI analysis job state */
+export const ANALYSIS_STATUSES = ["pending", "processing", "completed", "failed"] as const;
+export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
+
 /** Broad category of health document (extend as product grows) */
 export const HEALTH_REPORT_TYPES = [
   "lab",

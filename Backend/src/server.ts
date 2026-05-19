@@ -9,6 +9,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { notFound } from "./middleware/notFound";
 import { apiRoutes } from "./routes";
 import { healthRoutes } from "./routes/health.routes";
+import { translationRoutes } from "./translations/translation.routes";
 
 async function bootstrap(): Promise<void> {
   await connectDatabase();
@@ -41,6 +42,7 @@ async function bootstrap(): Promise<void> {
   app.use(limiter);
 
   app.use("/health", healthRoutes);
+  app.use("/translations", translationRoutes);
   app.use("/api", apiRoutes);
 
   app.use(notFound);

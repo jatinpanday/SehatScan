@@ -83,6 +83,12 @@ export const env = {
   googleVisionProjectId: process.env.GOOGLE_VISION_PROJECT_ID?.trim() ?? "",
   googleVisionClientEmail: process.env.GOOGLE_VISION_CLIENT_EMAIL?.trim() ?? "",
   googleVisionPrivateKey: (process.env.GOOGLE_VISION_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
+
+  openaiApiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
+  openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini",
+  openaiTimeoutMs: optionalNumber("OPENAI_TIMEOUT_MS", 120_000),
+  openaiMaxInputChars: optionalNumber("OPENAI_MAX_INPUT_CHARS", 28_000),
+  openaiMaxRetries: optionalNumber("OPENAI_MAX_RETRIES", 3),
 } as const;
 
 if (env.emailTransport === "smtp") {
